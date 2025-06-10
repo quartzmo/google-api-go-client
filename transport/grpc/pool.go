@@ -6,9 +6,11 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 
+	"cloud.google.com/go/auth"
 	"cloud.google.com/go/auth/grpctransport"
 	"google.golang.org/api/internal"
 	"google.golang.org/grpc"
@@ -114,4 +116,57 @@ func (p *poolAdapter) Invoke(ctx context.Context, method string, args interface{
 
 func (p *poolAdapter) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 	return p.pool.NewStream(ctx, desc, method, opts...)
+}
+
+// ConnPoolWithCredentials holds a gRPC connection pool and the credentials
+// used to create the pool, and implements the internal.ConnPool interface,
+// allowing it to be used where a ConnPool is expected.
+type ConnPoolWithCredentials struct {
+	Pool        grpctransport.GRPCClientConnPool
+	Credentials *auth.Credentials
+}
+
+// Conn returns a single connection from the pool.
+// Returns nil if ConnPoolWithCredentials.Pool is nil.
+func (p *ConnPoolWithCredentials) Conn() *grpc.ClientConn {
+	if p.Pool == nil {
+		return nil
+	}
+	return p.Pool.Connection()
+}
+
+// Num returns the number of connections in the pool.
+// Returns 0 if ConnPoolWithCredentials.Pool is nil.
+func (p *ConnPoolWithCredentials) Num() int {
+	if p.Pool == nil {
+		return 0
+	}
+	return p.Pool.Len()
+}
+
+// Close closes all connections in the pool.
+// Returns an error if ConnPoolWithCredentials.Pool is nil.
+func (p *ConnPoolWithCredentials) Close() error {
+	if p.Pool == nil {
+		return errors.New("pool is nil")
+	}
+	return p.Pool.Close()
+}
+
+// Invoke performs a unary RPC.
+// Returns an error if ConnPoolWithCredentials.Pool is nil.
+func (p *ConnPoolWithCredentials) Invoke(ctx context.Context, method string, args interface{}, reply interface{}, opts ...grpc.CallOption) error {
+	if p.Pool == nil {
+		return errors.New("pool is nil")
+	}
+	return p.Pool.Invoke(ctx, method, args, reply, opts...)
+}
+
+// NewStream creates a new streaming RPC.
+// Returns an error if ConnPoolWithCredentials.Pool is nil.
+func (p *ConnPoolWithCredentials) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	if p.Pool == nil {
+		return nil, errors.New("pool is nil")
+	}
+	return p.Pool.NewStream(ctx, desc, method, opts...)
 }

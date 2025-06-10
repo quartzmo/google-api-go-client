@@ -86,7 +86,7 @@ func Dial(ctx context.Context, opts ...option.ClientOption) (*grpc.ClientConn, e
 		return o.GRPCConnPool.Conn(), nil
 	}
 	if o.IsNewAuthLibraryEnabled() {
-		pool, err := dialPoolNewAuth(ctx, true, 1, o)
+		pool, _, err := dialPoolNewAuth(ctx, true, 1, o)
 		if err != nil {
 			return nil, err
 		}
@@ -108,7 +108,7 @@ func DialInsecure(ctx context.Context, opts ...option.ClientOption) (*grpc.Clien
 		return nil, err
 	}
 	if o.IsNewAuthLibraryEnabled() {
-		pool, err := dialPoolNewAuth(ctx, false, 1, o)
+		pool, _, err := dialPoolNewAuth(ctx, false, 1, o)
 		if err != nil {
 			return nil, err
 		}
@@ -130,18 +130,20 @@ func DialPool(ctx context.Context, opts ...option.ClientOption) (ConnPool, error
 		return nil, err
 	}
 	if o.GRPCConnPool != nil {
+		// Return type may not be ConnPoolWithCredentials and may lack credentials.
 		return o.GRPCConnPool, nil
 	}
 
 	if o.IsNewAuthLibraryEnabled() {
 		if o.GRPCConn != nil {
+			// Return type is not ConnPoolWithCredentials and lacks credentials.
 			return &singleConnPool{o.GRPCConn}, nil
 		}
-		pool, err := dialPoolNewAuth(ctx, true, o.GRPCConnPoolSize, o)
+		pool, creds, err := dialPoolNewAuth(ctx, true, o.GRPCConnPoolSize, o)
 		if err != nil {
 			return nil, err
 		}
-		return &poolAdapter{pool}, nil
+		return &ConnPoolWithCredentials{Pool: pool, Credentials: creds}, nil
 	}
 
 	poolSize := o.GRPCConnPoolSize
@@ -158,6 +160,7 @@ func DialPool(ctx context.Context, opts ...option.ClientOption) (ConnPool, error
 		if err != nil {
 			return nil, err
 		}
+		// Return type is not ConnPoolWithCredentials and lacks credentials.
 		return &singleConnPool{conn}, nil
 	}
 
@@ -170,11 +173,12 @@ func DialPool(ctx context.Context, opts ...option.ClientOption) (ConnPool, error
 		}
 		pool.conns = append(pool.conns, conn)
 	}
+	// Return type is not ConnPoolWithCredentials and lacks credentials.
 	return pool, nil
 }
 
 // dialPoolNewAuth is an adapter to call new auth library.
-func dialPoolNewAuth(ctx context.Context, secure bool, poolSize int, ds *internal.DialSettings) (grpctransport.GRPCClientConnPool, error) {
+func dialPoolNewAuth(ctx context.Context, secure bool, poolSize int, ds *internal.DialSettings) (grpctransport.GRPCClientConnPool, *auth.Credentials, error) {
 	// honor options if set
 	var creds *auth.Credentials
 	if ds.InternalCredentials != nil {
@@ -252,7 +256,10 @@ func dialPoolNewAuth(ctx context.Context, secure bool, poolSize int, ds *interna
 		UniverseDomain: ds.UniverseDomain,
 		Logger:         ds.Logger,
 	})
-	return pool, err
+	if err != nil {
+		return nil, nil, err
+	}
+	return pool, creds, nil
 }
 
 func prepareDialOptsNewAuth(ds *internal.DialSettings) []grpc.DialOption {
